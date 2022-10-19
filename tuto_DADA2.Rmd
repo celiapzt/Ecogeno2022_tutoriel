@@ -1,0 +1,103 @@
+---
+title: "DADA2 tutorial"
+output: github_document
+---
+
+```{r 1}
+install.packages("BiocManager")
+install.packages("ggplot2")
+install.packages("gridExtra")
+BiocManager::install("Rhtslib")
+BiocManager::install(c("dada2", "phyloseq", "DECIPHER", "phangorn"))
+```
+
+```{bash, eval=FALSE}
+sudo apt-get update -y
+sudo apt-get install -y libglpk-dev
+sudo apt-get install -y liblzma-dev libbz2-dev
+#sudo apt-get install libxtst6
+sudo apt-get install libxt6
+```
+
+# install packages
+```{r}
+install.packages("BiocManager")
+BiocManager::install("dada2")
+```
+
+```{bash}
+cd ~
+wget https://mothur.s3.us-east-2.amazonaws.com/wiki/miseqsopdata.zip
+unzip miseqsopdata.zip
+```
+
+```{r}
+library(dada2)
+library(phyloseq)
+library(DECIPHER)
+library(phangorn)
+library(ggplot2)
+library(gridExtra)
+install.packages(c("shiny","miniUI", "caret", "pls", "e1071", "ggplot2", "randomForest", "dplyr", "ggrepel", "devtools","reshape2", "PMA", "structSSI", "ade4", "ggnetwork", "intergraph", "scales"))
+install.packages("nlme")
+devtools::install_github(c("jfukuyama/phyloseqGraphTest"), force)
+BiocManager::install(c("genefilter", "impute"))
+```
+
+```{r}
+# Sort ensures forward/reverse reads are in same order
+fnFs <- sort(list.files(miseq_path, pattern="_R1_001.fastq"))
+fnRs <- sort(list.files(miseq_path, pattern="_R2_001.fastq"))
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sampleNames <- sapply(strsplit(fnFs, "_"), `[`, 1)
+# Specify the full path to the fnFs and fnRs
+fnFs <- file.path(miseq_path, fnFs)
+fnRs <- file.path(miseq_path, fnRs)
+fnRs[1:3]
+```
+
+
+```{r}
+plotQualityProfile(fnFs[1:2])
+```
+#F = forward 
+
+```{r}
+plotQualityProfile(fnRs[1:2])
+```
+#R = reverse -> qualité baissée
+
+```{r}
+filt_path <- file.path(miseq_path, "filtered") # Place filtered files in filtered/ subdirectory
+if(!file_test("-d", filt_path)) dir.create(filt_path)
+filtFs <- file.path(filt_path, paste0(sampleNames, "_F_filt.fastq.gz"))
+filtRs <- file.path(filt_path, paste0(sampleNames, "_R_filt.fastq.gz"))
+```
+
+```{r}
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(240,160),
+              maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+              compress=TRUE, multithread=TRUE) # On Windows set multithread=FALSE
+head(out)
+```
+
+```{r}
+derepFs <- derepFastq(filtFs, verbose=TRUE)
+derepRs <- derepFastq(filtRs, verbose=TRUE)
+# Name the derep-class objects by the sample names
+names(derepFs) <- sampleNames
+names(derepRs) <- sampleNames
+```
+
+```{r}
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtFs, multithread=TRUE)
+```
+```{r}
+installed.packages(c("shiny","miniUI", "caret", "pls", "e1071", "ggplot2", "randomForest", "dplyr", "ggrepel", "nlme", "devtools",
+                  "reshape2", "PMA", "structSSI", "ade4",
+                  "ggnetwork", "intergraph", "scales"))
+devtools::install_github("jfukuyama/phyloseqGraphTest")
+BiocManager::install(c("genefilter", "impute"))
+```
+
