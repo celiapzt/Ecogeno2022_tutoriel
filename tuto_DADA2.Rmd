@@ -40,7 +40,7 @@ library(ggplot2)
 library(gridExtra)
 install.packages(c("shiny","miniUI", "caret", "pls", "e1071", "ggplot2", "randomForest", "dplyr", "ggrepel", "devtools","reshape2", "PMA", "structSSI", "ade4", "ggnetwork", "intergraph", "scales"))
 install.packages("nlme")
-devtools::install_github(c("jfukuyama/phyloseqGraphTest"), force)
+devtools::install_github(c("jfukuyama/phyloseqGraphTest"), force=TRUE)
 BiocManager::install(c("genefilter", "impute"))
 ```
 
