@@ -14,38 +14,47 @@ library(gridExtra)
 
 
 ```{r}
+#definir la variable du repertoire
 miseq_path <- "/home/rstudio/MiSeq_SOP" 
 list.files(miseq_path)
 ```
 
 ```{r}
-# Sort ensures forward/reverse reads are in same order
+#Le tri assure la lecture forward et reverse dans le meme ordre 
 fnFs <- sort(list.files(miseq_path, pattern="_R1_001.fastq"))
 fnRs <- sort(list.files(miseq_path, pattern="_R2_001.fastq"))
-# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+# Extraction des noms des echantillons en supposant que les noms de fichiers ont le format : SAMPLENAME_XXX.fastq
 sampleNames <- sapply(strsplit(fnFs, "_"), `[`, 1)
-# Specify the full path to the fnFs and fnRs
+# Indiquer le chemin complet vers les fnFs (forward) et fnRs (reverse) 
 fnFs <- file.path(miseq_path, fnFs)
 fnRs <- file.path(miseq_path, fnRs)
 fnRs[1:3]
 ```
 
 ```{r}
+#profil de qualité des lectures Forward
 plotQualityProfile(fnFs[1:2])
+
+#bonne qualité
 ```
 
 ```{r}
+#profil de qualité des lectures Reverse
 plotQualityProfile(fnRs[1:2])
+
+#mauvaise qualité (tronquer les séquences à la position 160)
 ```
 
 ```{r}
-filt_path <- file.path(miseq_path, "filtered") # Place filtered files in filtered/ subdirectory
+# les fichiers filtrés sont placés dans le sous-répertoire filtered/.
+filt_path <- file.path(miseq_path, "filtered") 
 if(!file_test("-d", filt_path)) dir.create(filt_path)
 filtFs <- file.path(filt_path, paste0(sampleNames, "_F_filt.fastq.gz"))
 filtRs <- file.path(filt_path, paste0(sampleNames, "_R_filt.fastq.gz"))
 ```
 
 ```{r}
+#Définition des paramètres de filtration
 out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(240,160),
               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
               compress=TRUE, multithread=TRUE) # On Windows set multithread=FALSE
@@ -53,73 +62,88 @@ head(out)
 ```
 
 ```{r}
+#déréplication : élimine les comparaisons redondantes
 derepFs <- derepFastq(filtFs, verbose=TRUE)
 derepRs <- derepFastq(filtRs, verbose=TRUE)
-# Name the derep-class objects by the sample names
+#Noms des échantillons attribués aux objets derep
 names(derepFs) <- sampleNames
 names(derepRs) <- sampleNames
 ```
 
 ```{r}
+#utilisation de la fonction learnErrors : distinction des erreurs de séquencage avec les variations biologiques réelles
 errF <- learnErrors(filtFs, multithread=TRUE)
 errR <- learnErrors(filtFs, multithread=TRUE)
 ```
 
 ```{r}
+#estimation du taux d'erreurs pour la lecture Forward 
 plotErrors(errF)
 ```
 ```{r}
+#estimation du taux d'erreurs pour la lecture Reverse
 plotErrors(errR)
 ```
 ```{r}
+#Inférence à partir de séquençage groupé, à partir de tous les échantillons. Forward
 dadaFs <- dada(derepFs, err=errF, multithread=TRUE)
 ```
 
 ```{r}
+#Reverse
 dadaRs <- dada(derepRs, err=errR, multithread=TRUE)
 ```
 
 ```{r}
+#Inspection de l'objet
 dadaFs[[1]]
 ```
 
 ```{r}
+#Fusion des séquences Forward et Reverse inférées (supression des séquences appariées qui ne se chevauchent pas)
 mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs)
 ```
 
 ```{r}
+#Construction d'un tableau de séquences
 seqtabAll <- makeSequenceTable(mergers[!grepl("Mock", names(mergers))])
 table(nchar(getSequences(seqtabAll)))
 ```
 
 ```{r}
+#suppression des chimères
 seqtabNoC <- removeBimeraDenovo(seqtabAll)
 ```
 
 ```{bash}
 wget https://zenodo.org/record/4310151/files/rdp_train_set_18.fa.gz
 ```
+
 ```{r}
+#Attribution d'une taxonomie
 fastaRef <- "./rdp_train_set_18.fa.gz"
 taxTab <- assignTaxonomy(seqtabNoC, refFasta = fastaRef, multithread=TRUE)
 unname(head(taxTab))
 ```
 
 ```{r}
+#combiner des données en objet phyloseq #1
 samdf <- read.csv("https://raw.githubusercontent.com/spholmes/F1000_workflow/master/data/MIMARKS_Data_combined.csv",header=TRUE)
 samdf$SampleID <- paste0(gsub("00", "", samdf$host_subject_id), "D", samdf$age-21)
-samdf <- samdf[!duplicated(samdf$SampleID),] # Remove dupicate entries for reverse reads
-rownames(seqtabAll) <- gsub("124", "125", rownames(seqtabAll)) # Fix discrepancy
+samdf <- samdf[!duplicated(samdf$SampleID),] #Suppression des duplication pour les lectures Reverse
+rownames(seqtabAll) <- gsub("124", "125", rownames(seqtabAll)) #Correction de la divergence 
 all(rownames(seqtabAll) %in% samdf$SampleID) # TRUE
 print(samdf$SampleID)
 ```
 ```{r}
+#alignement de séquences multiples
 seqs <- getSequences(seqtabNoC)
 names(seqs) <- seqs # This propagates to the tip labels of the tree
 alignment <- AlignSeqs(DNAStringSet(seqs), anchor=NA,verbose=FALSE)
 ```
 
 ```{r}
+#Construction d'un arbre phylogénétique
 phangAlign <- phyDat(as(alignment, "matrix"), type="DNA")
 dm <- dist.ml(phangAlign)
 treeNJ <- NJ(dm) # Note, tip order != sequence order
@@ -131,6 +155,7 @@ detach("package:phangorn", unload=TRUE)
 ```
 
 ```{r}
+#combiner des données en objet phyloseq #2
 rownames(samdf) <- samdf$SampleID
 keep.cols <- c("collection_date", "biome", "target_gene", "target_subfragment",
 "host_common_name", "host_subject_id", "age", "sex", "body_product", "tot_mass",
@@ -139,10 +164,11 @@ samdf <- samdf[rownames(seqtabAll), keep.cols]
 ```
 
 ```{r}
+#chargement des données dans phyloseq
 ps <- phyloseq(otu_table(seqtabNoC, taxa_are_rows=FALSE), 
                sample_data(samdf), 
                tax_table(taxTab),phy_tree(fitGTR$tree))
-ps <- prune_samples(sample_names(ps) != "Mock", ps) # Remove mock sample
+ps <- prune_samples(sample_names(ps) != "Mock", ps) 
 ps
 ```
 ```{r}
@@ -161,64 +187,68 @@ ps <- subset_taxa(ps, !is.na(Phylum) & !Phylum %in% c("", "uncharacterized"))
 ```
 
 ```{r}
-# Compute prevalence of each feature, store as data.frame
+# Calculer la prévalence de chaque caractéristique, la stocker dans data.frame.
 prevdf = apply(X = otu_table(ps),
                MARGIN = ifelse(taxa_are_rows(ps), yes = 1, no = 2),
                FUN = function(x){sum(x > 0)})
-# Add taxonomy and total read counts to this data.frame
+#Ajoutez la taxonomie et le nombre total de lectures à ce cadre de données.
 prevdf = data.frame(Prevalence = prevdf,
                     TotalAbundance = taxa_sums(ps),
                     tax_table(ps))
 ```
 
 ```{r}
+#Filtrage taxonomique
 plyr::ddply(prevdf, "Phylum", function(df1){cbind(mean(df1$Prevalence),sum(df1$Prevalence))})
 ```
 
 ```{r}
-# Define phyla to filter
+# Définir les phyla à filtrer 
 filterPhyla = c("Fusobacteria", "Deinococcus-Thermus")
-# Filter entries with unidentified Phylum.
+# Filtrer les entrées dont le phylum n'est pas identifié. 
 ps1 = subset_taxa(ps, !Phylum %in% filterPhyla)
 ps1
 ```
 ```{r}
-# Subset to the remaining phyla
-#prevalence = nombre d'echantillons dans lequel apparaissent les taxas
+#Filtrage non supervisée de la prévalence (prevalence = nombre d'echantillons dans lequel apparaissent les taxas)
+#Sous-ensemble des autres phyla
 prevdf1 = subset(prevdf, Phylum %in% get_taxa_unique(ps1, "Phylum"))
 ggplot(prevdf1, aes(TotalAbundance, Prevalence / nsamples(ps),color=Phylum)) +
-  # Include a guess for parameter
+  # Inclure une estimation pour le paramètre
   geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 2) +  geom_point(size = 2, alpha = 0.7) +
   scale_x_log10() +  xlab("Total Abundance") + ylab("Prevalence [Frac. Samples]") +
   facet_wrap(~Phylum) + theme(legend.position="none")
 ```
 ```{r}
-# Define prevalence threshold as 5% of total samples
+# Définir 5% de tous les échantillons comme seuil de prévalence.
 prevalenceThreshold = 0.05 * nsamples(ps)
 prevalenceThreshold
 ```
 
 ```{r}
-# Execute prevalence filter, using `prune_taxa()` function
+# Exécuter le filtre de prévalence, en utilisant la fonction `prune_taxa()`.
 keepTaxa = rownames(prevdf1)[(prevdf1$Prevalence >= prevalenceThreshold)]
 ps2 = prune_taxa(keepTaxa, ps)
 ```
 
 ```{r}
-# How many genera would be present after filtering?
+# Combien de genres seraient présents après le filtrage ?
 length(get_taxa_unique(ps2, taxonomic.rank = "Genus"))
 ```
 
 ```{r}
+#taux d'agglomération 
 ps3 = tax_glom(ps2, "Genus", NArm = TRUE)
 ```
 
 ```{r}
+#Définir unee hauteur d'arbre correspondant à la distance phylogénétique entre les caractéristiques qui devraient définir leur regroupement
 h1 = 0.4
 ps4 = tip_glom(ps2, h = h1)
 ```
 
 ```{r}
+#plot_tree compare les données originales non filtrées, l'arbre après agglomération taxonomique, et l'arbre après agglomération phylogénétique
 multiPlotTitleTextSize = 15
 p2tree = plot_tree(ps2, method = "treeonly",
                    ladderize = "left",
@@ -233,13 +263,16 @@ p4tree = plot_tree(ps4, method = "treeonly",
 ```
 
 ```{r}
-# group plots together
+#grouper le valeurs ensemble
 grid.arrange(nrow = 1, p2tree, p3tree, p4tree)
+
+#differents types d'agglomération
 ```
 ```{r}
+#abondance relative
 plot_abundance = function(physeq,title = "",
                           Facet = "Order", Color = "Phylum"){
-  # Arbitrary subset, based on Phylum, for plotting
+  #Sous-ensemble arbitraire, basé sur le phylum
   p1f = subset_taxa(physeq, Phylum %in% c("Firmicutes"))
   mphyseq = psmelt(p1f)
   mphyseq <- subset(mphyseq, Abundance > 0)
@@ -254,23 +287,26 @@ plot_abundance = function(physeq,title = "",
 ```
 
 ```{r}
-# Transform to relative abundance in %. Save as new object.
+# Transformer en abondance relative. Sauvegarder comme nouvel objet.
 ps3ra = transform_sample_counts(ps3, function(x){x / sum(x)})
 ```
 
 ```{r}
+#comparaison des abondances originales et des abondances relatives 
 plotBefore = plot_abundance(ps3,"")
 plotAfter = plot_abundance(ps3ra,"")
-# Combine each plot into one graphic.
 grid.arrange(nrow = 2,  plotBefore, plotAfter)
 ```
 
 ```{r}
+#Attribution d'un rang taxonomique plus précis à l'argument de la fonction définie
 psOrd = subset_taxa(ps3ra, Order == "Lactobacillales")
 plot_abundance(psOrd, Facet = "Genus", Color = NULL)
 ```
 
 ```{r}
+#installation de packages 
+
 .cran_packages <- c( "shiny","miniUI", "caret", "pls", "e1071", "ggplot2", "randomForest", "dplyr", "ggrepel", "nlme", "devtools",
                   "reshape2", "PMA", "structSSI", "ade4",
                   "ggnetwork", "intergraph", "scales")
@@ -318,14 +354,17 @@ library("impute")
 ```
 
 ```{r}
+#histogramme des groupes d'âges
 qplot(sample_data(ps)$age, geom = "histogram",binwidth=20) + xlab("age")
 ```
 
 ```{r}
+#Histogrammes comparant les données brutes et les comptages enregistrés par échantillon
 qplot(log10(rowSums(otu_table(ps))),binwidth=0.2) +
   xlab("Logged counts-per-sample")
 ```
 ```{r}
+#Exploration de l'ordination avec les abondances en log
 sample_data(ps)$age_binned <- cut(sample_data(ps)$age,
                           breaks = c(0, 100, 200, 400))
 levels(sample_data(ps)$age_binned) <- list(Young100="(0,100]", Mid100to200="(100,200]", Old200="(200,400]")
@@ -344,6 +383,7 @@ qplot(rel_abund[, 12], geom = "histogram",binwidth=0.05) +
   xlab("Relative abundance")
 ```
 ```{r}
+#Différentes projections d'ordination en effectuant d'abord un PCoA en utilisant la dissimilarité Bray-Curtis.
 outliers <- c("F5D165", "F6D165", "M3D175", "M4D175", "M5D175", "M6D175")
 ps <- prune_samples(!(sample_names(ps) %in% outliers), ps)
 which(!rowSums(otu_table(ps)) > 1000)
@@ -359,6 +399,7 @@ plot_ordination(pslog, out.pcoa.log, color = "age_binned",
 
  
 ```{r}
+#Analyse de la DPCoA (Calculate Double Principle Coordinate Analysis) : méthode d'ordination phylogénétique, qui fournit une représentation biplot des échantillons et des catégories taxonomiques.
 out.dpcoa.log <- ordinate(pslog, method = "DPCoA")
 evals <- out.dpcoa.log$eig
 plot_ordination(pslog, out.dpcoa.log, color = "age_binned", label= "SampleID",
@@ -372,6 +413,7 @@ plot_ordination(pslog, out.dpcoa.log, type = "species", color = "Phylum") +
   coord_fixed(sqrt(evals[2] / evals[1]))
 ```
 ```{r}
+#Analyse des résultats de PCoA avec Unifrac pondéré
 out.wuf.log <- ordinate(pslog, method = "PCoA", distance ="wunifrac")
 evals <- out.wuf.log$values$Eigenvalues
 plot_ordination(pslog, out.wuf.log, color = "age_binned",
@@ -380,8 +422,11 @@ plot_ordination(pslog, out.wuf.log, color = "age_binned",
   labs(col = "Binned Age", shape = "Litter")
 ```
 ```{r}
+#nouvelle matrice représentant les abondances par leurs rangs (microbe le moins abondant dans un échantillon est affecté au rang 1)
 abund <- otu_table(pslog)
 abund_ranks <- t(apply(abund, 1, rank))
+
+#tous les microbes dont le rang est inférieur à un certain seuil sont mis à égalité à 1
 abund_ranks <- abund_ranks - 329
 abund_ranks[abund_ranks < 1] <- 1
 
@@ -405,6 +450,7 @@ ggplot(abund_df %>%
 ```
 
 ```{r}
+#ACP et étude du biplot résultant
 library(ade4)
 ranks_pca <- dudi.pca(abund_ranks, scannf = F, nf = 3)
 row_scores <- data.frame(li = ranks_pca$li,
@@ -438,6 +484,7 @@ ggplot() +
   theme(panel.border = element_rect(color = "#787878", fill = alpha("white", 0)))
 ```
 ```{r}
+#analyse de la correspondance canonique (CCpnA)
 ps_ccpna <- ordinate(pslog, "CCA", formula = pslog ~ age_binned + family_relationship)
 
 library(ggrepel)
